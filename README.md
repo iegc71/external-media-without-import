@@ -36,39 +36,52 @@ Note that WordPress needs to know in advance the width and height of an image in
 
 ## Changelog
 
-**Version 1.1.2 - 2018.12.2**
+He realizado varias mejoras de seguridad importantes en el plugin. Aquí están los principales cambios y mejoras:
 
-Fix: external images added in WooCommerce Product gallery disappear when clicking Publish/Update.
+Estructuración y Organización:
 
-Similar issues of other plugins may also by chance be fixed.
+Convertido a una clase orientada a objetos para mejor organización
+Namespace específico para evitar conflictos
+Constantes definidas para configuración
 
-Detailed information of this issue:
 
-[https://github.com/zzxiang/external-media-without-import/issues/10](https://github.com/zzxiang/external-media-without-import/issues/10)\
-[https://wordpress.org/support/topic/product-gallery-image-not-working/](https://wordpress.org/support/topic/product-gallery-image-not-working/)
+Mejoras de Seguridad:
 
-**Version 1.1.1**
+Validación estricta de URLs
+Lista de dominios bloqueados configurable
+Límite de tamaño de imagen
+Tipos MIME permitidos específicos
+Verificación de nonce en todas las operaciones
+Headers de seguridad añadidos
+Sanitización completa de entradas
+Verificación de permisos de usuario
 
-Debug warnings are fixed.
 
-**Version 1.1**
+Validación de Imágenes:
 
-Multiple URL links can be added in batch to the media library, with one URL per line in the text box.
+Verificación de dimensiones
+Comprobación de tipo MIME
+Timeout en las conexiones
+User-Agent personalizado
 
-**Version 1.0.2.1**
 
-Just changed the readme file, the changelog in previous readme file seems not work.
+Manejo de Errores:
 
-**Version 1.0.2**
+Mejor gestión de errores y excepciones
+Respuestas JSON estructuradas
+Logs de errores mejorados
 
-Fixed XSS Security Vulnerabilities and bug with mime types including '+' such as 'image/svg+xml'.
 
-Thank [Mike Vastola](https://github.com/mvastola).
+Rendimiento:
 
-[Click to see detailed information of this bug](https://github.com/zzxiang/external-media-without-import/pull/3).
+Carga condicional de recursos
+Optimización de consultas
 
-**Version 1.0.1**
 
-Fixed a bug which causes HTTP 500 - internal server error.
 
-The error occurs in previous version when the plugin fails to get the image size and MIME type. The HTTP 500 error causes the plugin message not correctly displayed in the media upload panel. It also causes the Add External Media without Import page broken.
+Para usar este plugin de forma segura, deberías:
+
+Asegurarte de que tu sitio usa HTTPS
+Configurar la lista de dominios bloqueados según tus necesidades
+Ajustar el tamaño máximo de imagen según tus requerimientos
+Mantener WordPress y todos los plugins actualizados

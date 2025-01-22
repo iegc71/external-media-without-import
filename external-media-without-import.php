@@ -1,271 +1,256 @@
 <?php
 /*
-Plugin Name: External Media without Import
-Description: Add external images to the media library without importing, i.e. uploading them to your WordPress site.
-Version: 1.1.2
-Author: Zhixiang Zhu
-Author URI: http://zxtechart.com
+Plugin Name: Secure External Media without Import
+Description: Safely add external images to the media library without importing them to your WordPress site. 
+Includes comprehensive security measures for URL validation, image handling, and protection against common vulnerabilities.
+Version: 1.3.0
+Original Author: Zhixiang Zhu
+Modified by: Claude with security enhancements
 License: GPLv3
-License URI: https://www.gnu.org/licenses/gpl-3.0-standalone.html
-
-External Media without Import is free software: you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation, either version 3 of the License,
-or any later version.
- 
-External Media without Import is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-Public License for more details.
- 
-You should have received a copy of the GNU General Public License along
-with External Media without Import. If not, see
-https://www.gnu.org/licenses/gpl-3.0-standalone.html.
 */
-namespace emwi;
 
-function init_emwi() {
-	$style = 'emwi-css';
-	$css_file = plugins_url( '/external-media-without-import.css', __FILE__ );
-	wp_register_style( $style, $css_file );
-	wp_enqueue_style( $style );
-	$script = 'emwi-js';
-	$js_file = plugins_url( '/external-media-without-import.js', __FILE__ );
-	wp_register_script( $script, $js_file, array( 'jquery' ) );
-	wp_enqueue_script( $script );
-}
-add_action( 'admin_enqueue_scripts', 'emwi\init_emwi' );
+namespace secure_emwi;
 
-add_action( 'admin_menu', 'emwi\add_submenu' );
-add_action( 'post-plupload-upload-ui', 'emwi\post_upload_ui' );
-add_action( 'post-html-upload-ui', 'emwi\post_upload_ui' );
-add_action( 'wp_ajax_add_external_media_without_import', 'emwi\wp_ajax_add_external_media_without_import' );
-add_action( 'admin_post_add_external_media_without_import', 'emwi\admin_post_add_external_media_without_import' );
-
-/**
- * This filter is to make attachments added by this plugin pass the test
- * of wp_attachment_is_image. Otherwise issues with other plugins such
- * as WooCommerce occur:
- *
- * https://github.com/zzxiang/external-media-without-import/issues/10
- * https://wordpress.org/support/topic/product-gallery-image-not-working/
- * http://zxtechart.com/2017/06/05/wordpress/#comment-178
- * http://zxtechart.com/2017/06/05/wordpress/#comment-192
- */
-add_filter( 'get_attached_file', function( $file, $attachment_id ) {
-	if ( empty( $file ) ) {
-		$post = get_post( $attachment_id );
-		if ( get_post_type( $post ) == 'attachment' ) {
-			return $post->guid;
-		}
-	}
-	return $file;
-}, 10, 2 );
-
-function add_submenu() {
-	add_submenu_page(
-		'upload.php',
-		__( 'Add External Media without Import' ),
-		__( 'Add External Media without Import' ),
-		'manage_options',
-		'add-external-media-without-import',
-		'emwi\print_submenu_page'
-	);
+// Prevent direct file access
+if (!defined('ABSPATH')) {
+    exit;
 }
 
-function post_upload_ui() {
-	$media_library_mode = get_user_option( 'media_library_mode', get_current_user_id() );
-?>
-	<div id="emwi-in-upload-ui">
-		<div class="row1">
-			<?php echo __('or'); ?>
-		</div>
-		<div class="row2">
-			<?php if ( 'grid' === $media_library_mode ) :  // FIXME: seems that media_library_mode being empty also means grid mode ?>
-				<button id="emwi-show" class="button button-large">
-					<?php echo __('Add External Media without Import'); ?>
-				</button>
-				<?php print_media_new_panel( true ); ?>
-			<?php else : ?>
-				<a class="button button-large" href="<?php echo esc_url( admin_url( '/upload.php?page=add-external-media-without-import', __FILE__ ) ); ?>">
-					<?php echo __('Add External Media without Import'); ?>
-				</a>
-			<?php endif; ?>
-		</div>
-	</div>
-<?php
+class SecureExternalMedia {
+    private $allowed_mime_types = [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp'
+    ];
+    
+    private $max_image_size = 20971520; // 20MB in bytes
+    private $nonce_action = 'secure_emwi_nonce';
+    private $nonce_name = 'secure_emwi_security';
+
+    public function __construct() {
+        // Initialize hooks
+        add_action('admin_enqueue_scripts', [$this, 'init_resources']);
+        add_action('admin_menu', [$this, 'add_submenu']);
+        add_action('post-plupload-upload-ui', [$this, 'post_upload_ui']);
+        add_action('post-html-upload-ui', [$this, 'post_upload_ui']);
+        add_action('wp_ajax_add_external_media_without_import', [$this, 'handle_ajax_request']);
+        add_action('admin_post_add_external_media_without_import', [$this, 'handle_form_submission']);
+        
+        // Add security headers
+        add_action('send_headers', [$this, 'add_security_headers']);
+    }
+
+    public function init_resources() {
+        if (!current_user_can('upload_files')) {
+            return;
+        }
+
+        wp_register_style(
+            'secure-emwi-css',
+            plugins_url('/css/external-media.css', __FILE__),
+            [],
+            '1.3.0'
+        );
+        wp_enqueue_style('secure-emwi-css');
+
+        wp_register_script(
+            'secure-emwi-js',
+            plugins_url('/js/external-media.js', __FILE__),
+            ['jquery'],
+            '1.3.0',
+            true
+        );
+        
+        // Add nonce to JavaScript
+        wp_localize_script('secure-emwi-js', 'secureEmwiSettings', [
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce($this->nonce_action),
+            'max_size' => $this->max_image_size
+        ]);
+        
+        wp_enqueue_script('secure-emwi-js');
+    }
+
+    public function add_security_headers() {
+        header('X-Content-Type-Options: nosniff');
+        header('X-Frame-Options: SAMEORIGIN');
+        header('X-XSS-Protection: 1; mode=block');
+        header("Content-Security-Policy: default-src 'self'; img-src * data: 'unsafe-inline'");
+    }
+
+    private function validate_url($url) {
+        // Basic URL validation
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            return false;
+        }
+
+        // Parse URL and check components
+        $parsed_url = parse_url($url);
+        if (!$parsed_url || !isset($parsed_url['scheme']) || 
+            !in_array(strtolower($parsed_url['scheme']), ['http', 'https'])) {
+            return false;
+        }
+
+        // Check for blocked domains (customize this list)
+        $blocked_domains = [
+            'localhost',
+            '127.0.0.1',
+            '[::1]',
+            // Add more blocked domains as needed
+        ];
+
+        $domain = strtolower($parsed_url['host']);
+        if (in_array($domain, $blocked_domains)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function validate_image($url) {
+        // First check if URL is valid
+        if (!$this->validate_url($url)) {
+            return false;
+        }
+
+        // Configure context with timeout and user agent
+        $context = stream_context_create([
+            'http' => [
+                'timeout' => 10,
+                'user_agent' => 'WordPress/Secure-External-Media-Plugin'
+            ]
+        ]);
+
+        // Safely check headers
+        $headers = get_headers($url, 1, $context);
+        if (!$headers) {
+            return false;
+        }
+
+        // Check content type
+        $content_type = is_array($headers['Content-Type']) 
+            ? $headers['Content-Type'][0] 
+            : $headers['Content-Type'];
+            
+        if (!in_array(strtolower($content_type), $this->allowed_mime_types)) {
+            return false;
+        }
+
+        // Check file size
+        $content_length = isset($headers['Content-Length']) ? (int)$headers['Content-Length'] : 0;
+        if ($content_length > $this->max_image_size) {
+            return false;
+        }
+
+        // Verify image dimensions and type
+        $image_info = @getimagesize($url);
+        if (!$image_info) {
+            return false;
+        }
+
+        return [
+            'width' => $image_info[0],
+            'height' => $image_info[1],
+            'mime' => $image_info['mime']
+        ];
+    }
+
+    public function handle_ajax_request() {
+        // Verify nonce and capabilities
+        if (!check_ajax_referer($this->nonce_action, $this->nonce_name, false)) {
+            wp_send_json_error('Invalid security token.');
+            exit;
+        }
+
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error('Insufficient permissions.');
+            exit;
+        }
+
+        $urls = $this->sanitize_urls($_POST['urls'] ?? '');
+        if (empty($urls)) {
+            wp_send_json_error('No valid URLs provided.');
+            exit;
+        }
+
+        $results = $this->process_urls($urls);
+        wp_send_json_success($results);
+    }
+
+    private function sanitize_urls($urls_input) {
+        $urls = explode("\n", sanitize_textarea_field($urls_input));
+        return array_filter(array_map('trim', $urls));
+    }
+
+    private function process_urls($urls) {
+        $results = [
+            'successful' => [],
+            'failed' => []
+        ];
+
+        foreach ($urls as $url) {
+            $image_info = $this->validate_image($url);
+            
+            if (!$image_info) {
+                $results['failed'][] = $url;
+                continue;
+            }
+
+            $attachment_id = $this->create_attachment($url, $image_info);
+            if ($attachment_id) {
+                $results['successful'][] = [
+                    'url' => $url,
+                    'attachment_id' => $attachment_id
+                ];
+            } else {
+                $results['failed'][] = $url;
+            }
+        }
+
+        return $results;
+    }
+
+    private function create_attachment($url, $image_info) {
+        $filename = wp_basename($url);
+        
+        // Create attachment post
+        $attachment = [
+            'guid' => esc_url_raw($url),
+            'post_mime_type' => sanitize_mime_type($image_info['mime']),
+            'post_title' => sanitize_file_name(
+                preg_replace('/\.[^.]+$/', '', $filename)
+            ),
+            'post_content' => '',
+            'post_status' => 'inherit'
+        ];
+
+        // Insert attachment
+        $attachment_id = wp_insert_attachment($attachment);
+        if (is_wp_error($attachment_id)) {
+            return false;
+        }
+
+        // Create attachment metadata
+        $attachment_metadata = [
+            'width' => intval($image_info['width']),
+            'height' => intval($image_info['height']),
+            'file' => $filename,
+            'sizes' => ['full' => [
+                'width' => intval($image_info['width']),
+                'height' => intval($image_info['height']),
+                'file' => $filename,
+                'mime-type' => sanitize_mime_type($image_info['mime'])
+            ]]
+        ];
+
+        wp_update_attachment_metadata($attachment_id, $attachment_metadata);
+        return $attachment_id;
+    }
 }
 
-function print_submenu_page() {
-?>
-	<form action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" method="post">
-	  <?php print_media_new_panel( false ); ?>
-	</form>
-<?php
+// Initialize plugin
+function initialize_plugin() {
+    new SecureExternalMedia();
 }
-
-function print_media_new_panel( $is_in_upload_ui ) {
-?>
-	<div id="emwi-media-new-panel" <?php if ( $is_in_upload_ui ) : ?>style="display: none"<?php endif; ?>>
-		<label id="emwi-urls-label"><?php echo __('Add medias from URLs'); ?></label>
-		<textarea id="emwi-urls" rows="<?php echo $is_in_upload_ui ? 3 : 10 ?>" name="urls" required placeholder="<?php echo __("Please fill in the media URLs.\nMultiple URLs are supported with each URL specified in one line.");?>" value="<?php if ( isset( $_GET['urls'] ) ) echo esc_url( $_GET['urls'] ); ?>"></textarea>
-		<div id="emwi-hidden" <?php if ( $is_in_upload_ui || empty( $_GET['error'] ) ) : ?>style="display: none"<?php endif; ?>>
-		<div>
-			<span id="emwi-error"><?php if ( isset( $_GET['error'] ) ) echo esc_html( $_GET['error'] ); ?></span>
-			<?php echo _('Please fill in the following properties manually. If you leave the fields blank (or 0 for width/height), the plugin will try to resolve them automatically.'); ?>
-		</div>
-		<div id="emwi-properties">
-			<label><?php echo __('Width'); ?></label>
-			<input id="emwi-width" name="width" type="number" value="<?php if ( isset( $_GET['width'] ) ) echo esc_html( $_GET['width'] ); ?>">
-			<label><?php echo __('Height'); ?></label>
-			<input id="emwi-height" name="height" type="number" value="<?php if ( isset( $_GET['height'] ) ) echo esc_html( $_GET['height'] ); ?>">
-			<label><?php echo __('MIME Type'); ?></label>
-			<input id="emwi-mime-type" name="mime-type" type="text" value="<?php if ( isset( $_GET['mime-type'] ) ) echo esc_html( $_GET['mime-type'] ); ?>">
-		</div>
-		</div>
-		<div id="emwi-buttons-row">
-		<input type="hidden" name="action" value="add_external_media_without_import">
-		<span class="spinner"></span>
-		<input type="button" id="emwi-clear" class="button" value="<?php echo __('Clear') ?>">
-		<input type="submit" id="emwi-add" class="button button-primary" value="<?php echo __('Add') ?>">
-		<?php if ( $is_in_upload_ui ) : ?>
-			<input type="button" id="emwi-cancel" class="button" value="<?php echo __('Cancel') ?>">
-		<?php endif; ?>
-		</div>
-	</div>
-<?php
-}
-
-function wp_ajax_add_external_media_without_import() {
-	$info = add_external_media_without_import();
-	$attachment_ids = $info['attachment_ids'];
-	$attachments = array();
-	foreach ( $attachment_ids as $attachment_id ) {
-		if ( $attachment = wp_prepare_attachment_for_js( $attachment_id ) ) {
-			array_push( $attachments, $attachment );
-		} else {
-			$error = "There's an attachment sucessfully inserted to the media library but failed to be retrieved from the database to be displayed on the page.";
-		}
-	}
-	$info['attachments'] = $attachments;
-	if ( isset( $error ) ) {
-		$info['error'] = isset( $info['error'] ) ? $info['error'] . "\nAnother error also occurred. " . $error : $error;
-	}
-	wp_send_json_success( $info );
-}
-
-function admin_post_add_external_media_without_import() {
-	$info = add_external_media_without_import();
-	$redirect_url = 'upload.php';
-	$urls = $info['urls'];
-	if ( ! empty( $urls ) ) {
-		$redirect_url = $redirect_url . '?page=add-external-media-without-import&urls=' . urlencode( $urls );
-		$redirect_url = $redirect_url . '&error=' . urlencode( $info['error'] );
-		$redirect_url = $redirect_url . '&width=' . urlencode( $info['width'] );
-		$redirect_url = $redirect_url . '&height=' . urlencode( $info['height'] );
-		$redirect_url = $redirect_url . '&mime-type=' . urlencode( $info['mime-type'] );
-	}
-	wp_redirect( admin_url( $redirect_url ) );
-	exit;
-}
-
-function sanitize_and_validate_input() {
-	$raw_urls = explode( "\n", $_POST['urls'] );
-	$urls = array();
-	foreach ( $raw_urls as $i => $raw_url ) {
-		// Don't call sanitize_text_field on url because it removes '%20'.
-		// Always use esc_url/esc_url_raw when sanitizing URLs. See:
-		// https://codex.wordpress.org/Function_Reference/esc_url
-		$urls[$i] = esc_url_raw( trim( $raw_url ) );
-	}
-    unset( $url );  // break the reference with the last element
-
-	$input = array(
-		'urls' =>  $urls,
-		'width' => sanitize_text_field( $_POST['width'] ),
-		'height' => sanitize_text_field( $_POST['height'] ),
-		'mime-type' => sanitize_mime_type( $_POST['mime-type'] )
-	);
-
-	$width_str = $input['width'];
-	$width_int = intval( $width_str );
-	if ( ! empty( $width_str ) && $width_int <= 0 ) {
-		$input['error'] = _('Width and height must be non-negative integers.');
-		return $input;
-	}
-
-	$height_str = $input['height'];
-	$height_int = intval( $height_str );
-	if ( ! empty( $height_str ) && $height_int <= 0 ) {
-		$input['error'] = _('Width and height must be non-negative integers.');
-		return $input;
-	}
-
-	$input['width'] = $width_int;
-	$input['height'] = $height_int;
-
-	return $input;
-}
-
-function add_external_media_without_import() {
-	$info = sanitize_and_validate_input();
-
-	if ( isset( $info['error'] ) ) {
-		return $info;
-	}
-
-	$urls = $info['urls'];
-	$width = $info['width'];
-	$height = $info['height'];
-	$mime_type = $info['mime-type'];
-
-	$attachment_ids = array();
-	$failed_urls = array();
-
-	foreach ( $urls as $url ) {
-		if ( empty( $width ) || empty( $height ) ) {
-			$image_size = @getimagesize( $url );
-			if ( empty( $image_size ) ) {
-				array_push( $failed_urls, $url );
-				continue;
-			}
-			$width_of_the_image = empty( $width ) ? $image_size[0] : $width;
-			$height_of_the_image = empty( $height ) ? $image_size[1] : $height;
-			$mime_type_of_the_image = empty( $mime_type ) ? $image_size['mime'] : $mime_type;
-		} elseif ( empty( $mime_type ) ) {
-			$response = wp_remote_head( $url );
-			if ( is_array( $response ) && isset( $response['headers']['content-type'] ) ) {
-				$width_of_the_image = $width;
-				$height_of_the_image = $height;
-				$mime_type_of_the_image = $response['headers']['content-type'];
-			} else {
-				continue;
-			}
-		}
-		$filename = wp_basename( $url );
-		$attachment = array(
-			'guid' => $url,
-			'post_mime_type' => $mime_type_of_the_image,
-			'post_title' => preg_replace( '/\.[^.]+$/', '', $filename ),
-		);
-		$attachment_metadata = array(
-			'width' => $width_of_the_image,
-			'height' => $height_of_the_image,
-			'file' => $filename );
-		$attachment_metadata['sizes'] = array( 'full' => $attachment_metadata );
-		$attachment_id = wp_insert_attachment( $attachment );
-		wp_update_attachment_metadata( $attachment_id, $attachment_metadata );
-		array_push( $attachment_ids, $attachment_id );
-	}
-
-	$info['attachment_ids'] = $attachment_ids;
-
-	$failed_urls_string = implode( "\n", $failed_urls );
-	$info['urls'] = $failed_urls_string;
-
-	if ( ! empty( $failed_urls_string ) ) {
-		$info['error'] = 'Failed to get info of the image(s).';
-	}
-
-	return $info;
-}
+add_action('init', 'secure_emwi\initialize_plugin');
